@@ -3,30 +3,26 @@ import csv
 import dropbox
 from dropbox.exceptions import ApiError
 
-# Get Dropbox token from GitHub Secrets
 DROPBOX_TOKEN = os.getenv("DROPBOX_ACCESS_TOKEN")
-TARGET_FOLDER = "" # Leave empty ("") for root folder, or use "/YourFolderName"
+TARGET_FOLDER = "" # Leave empty ("") for root folder
 
 def convert_txt_to_csv(local_txt_path, local_csv_path):
-    """Your exact binary processing logic, optimized for file I/O"""
     with open(local_txt_path, "rb") as f:
         content = f.read()
 
-    # Generate Headers
     col1 =['Cell'+str(i+1) for i in range(14)]
     col2 =['Temp'+str(i+1)+' C' for i in range(5)]
-    col_names = ['Date','Time','Current','Mode','Voltage'] + col2 + col1 + \['Max Cell','Min Cell','Cell Difference','State of Charge(SOC)','Fault','Charging','DisCharging']
+    
+    # FIXED: Removed the invalid backslash 
+    col_names = ['Date','Time','Current','Mode','Voltage'] + col2 + col1 +['Max Cell','Min Cell','Cell Difference','State of Charge(SOC)','Fault','Charging','DisCharging']
 
-    if len(content) % 47 != 0:
-        print(f"Warning: File {local_txt_path} is incomplete or corrupted (not a multiple of 47 bytes).")
-        return False
-
-    # Open CSV once for writing (Much faster than opening in 'a' mode inside the loop)
+    # Process chunks of 47 bytes safely
     with open(local_csv_path, 'w', newline='') as csvfile:
         csv_writer = csv.writer(csvfile)
         csv_writer.writerow(col_names)
 
-        for i in range(0, len(content), 47):
+        # Loop through content in exact 47-byte blocks
+        for i in range(0, len(content) - 46, 47):
             d1 =[b for b in content[i:i + 47]]
 
             da = f"{d1[0]:02d}:{d1[1]:02d}:{d1[2]:02d}"
@@ -55,6 +51,7 @@ def convert_txt_to_csv(local_txt_path, local_csv_path):
 
             if len(datal1) == 31:
                 csv_writer.writerow(datal1)
+                
     return True
 
 def main():
@@ -65,42 +62,48 @@ def main():
     dbx = dropbox.Dropbox(DROPBOX_TOKEN)
     
     try:
-        # List files in the Dropbox folder
+        # Get all files in the folder
         result = dbx.files_list_folder(TARGET_FOLDER)
         
         for entry in result.entries:
+            # Look for ANY .TXT file
             if isinstance(entry, dropbox.files.FileMetadata) and entry.name.upper().endswith('.TXT'):
+                txt_filename = entry.name
+                # Keep exact same filename, just change .TXT to .csv
+                csv_filename = txt_filename.rsplit('.', 1)[0] + '.csv'
+                
                 txt_path_lower = entry.path_lower
                 csv_path_lower = txt_path_lower.rsplit('.', 1)[0] + '.csv'
+                csv_path_display = entry.path_display.rsplit('.', 1)[0] + '.csv'
                 
-                # Check if CSV already exists to avoid reprocessing
+                # Check if this exact CSV already exists in Dropbox
                 try:
                     dbx.files_get_metadata(csv_path_lower)
-                    print(f"Skipping {entry.name}, CSV already exists.")
-                    continue
+                    print(f"Skipping {txt_filename}... {csv_filename} already exists!")
+                    continue # Skips to the next file if CSV is found
                 except ApiError as e:
                     if e.error.is_path() and e.error.get_path().is_not_found():
-                        pass # CSV doesn't exist, proceed!
+                        pass # CSV doesn't exist, proceed to process
                     else:
                         raise
 
-                print(f"Processing {entry.name}...")
+                print(f"Processing new file: {txt_filename}...")
                 
-                # Download TXT file from Dropbox
-                local_txt = f"./{entry.name}"
-                local_csv = local_txt.rsplit('.', 1)[0] + '.csv'
+                # Download TXT file to GitHub runner
+                local_txt = f"./{txt_filename}"
+                local_csv = f"./{csv_filename}"
                 dbx.files_download_to_file(local_txt, txt_path_lower)
 
-                # Convert binary TXT to CSV using your logic
+                # Convert binary TXT to CSV
                 success = convert_txt_to_csv(local_txt, local_csv)
                 
                 if success:
-                    # Upload CSV back to Dropbox
+                    # Upload newly created CSV back to Dropbox (Leaves original TXT untouched)
                     with open(local_csv, 'rb') as f:
-                        dbx.files_upload(f.read(), csv_path_lower, mode=dropbox.files.WriteMode.overwrite)
-                    print(f"Successfully uploaded {local_csv} to Dropbox!")
+                        dbx.files_upload(f.read(), csv_path_display, mode=dropbox.files.WriteMode.overwrite)
+                    print(f"Successfully uploaded {csv_filename} to Dropbox!")
                 
-                # Clean up local GitHub runner files
+                # Clean up local temporary files from GitHub Server
                 if os.path.exists(local_txt): os.remove(local_txt)
                 if os.path.exists(local_csv): os.remove(local_csv)
 
