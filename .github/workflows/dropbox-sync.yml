@@ -1,11 +1,8 @@
 name: Process Battery Data from Dropbox
 
 on:
-  schedule:
-    # Runs automatically at the top of every hour
-    - cron: '0 * * * *'
+  # This ensures it ONLY runs manually
   workflow_dispatch: 
-    # Adds a button in the GitHub UI to run it manually whenever you want
 
 jobs:
   process-data:
