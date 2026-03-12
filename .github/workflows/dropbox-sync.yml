@@ -1,0 +1,30 @@
+name: Process Battery Data from Dropbox
+
+on:
+  schedule:
+    # Runs automatically at the top of every hour
+    - cron: '0 * * * *'
+  workflow_dispatch: 
+    # Adds a button in the GitHub UI to run it manually whenever you want
+
+jobs:
+  process-data:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install dropbox
+
+      - name: Run Processing Script
+        env:
+          DROPBOX_ACCESS_TOKEN: ${{ secrets.DROPBOX_ACCESS_TOKEN }}
+        run: python process_dropbox.py
